@@ -8,6 +8,7 @@
 #include <gtkmm/window.h>
 #include <json/json.h>
 
+#include <map>
 #include <memory>
 #include <optional>
 #include <vector>
@@ -102,6 +103,10 @@ class Bar : public sigc::trackable {
   void onConfigure(GdkEventConfigure* ev);
   void configureGlobalOffset(int width, int height);
   void onOutputGeometryChanged();
+  Gtk::Widget& wrapForOverflow(const std::shared_ptr<waybar::AModule>& module);
+  void scheduleOverflowCheck();
+  bool overflowExceeds();
+  void checkOverflow();
 
   /* Copy initial set of modes to allow customization */
   bar_mode_map configured_modes = PRESET_MODES;
@@ -123,6 +128,18 @@ class Bar : public sigc::trackable {
   std::unique_ptr<BarIpcClient> _ipc_client;
 #endif
   std::vector<std::shared_ptr<waybar::AModule>> modules_all_;
+
+  /* overflow-priority: modules that may be hidden when the bar does not fit */
+  struct OverflowEntry {
+    std::unique_ptr<Gtk::Box> wrapper;
+    int priority;
+    int order;
+    bool hidden = false;
+  };
+  std::map<waybar::AModule*, std::pair<int, int>> overflow_priorities_;  // priority, config order
+  std::vector<OverflowEntry> overflow_entries_;
+  bool overflow_check_pending_ = false;
+  bool overflow_checking_ = false;
 
   waybar::util::KillSignalAction onSigusr1 = util::SIGNALACTION_DEFAULT_SIGUSR1;
   waybar::util::KillSignalAction onSigusr2 = util::SIGNALACTION_DEFAULT_SIGUSR2;

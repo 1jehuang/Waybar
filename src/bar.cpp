@@ -308,6 +308,7 @@ waybar::Bar::Bar(struct waybar_output* w_output, const Json::Value& w_config)
 
   setupWidgets();
   window.show_all();
+  scheduleOverflowCheck();
 
   if (spdlog::should_log(spdlog::level::debug)) {
     // Unfortunately, this function isn't in the C++ bindings, so we have to call the C version.
@@ -554,6 +555,10 @@ void waybar::Bar::getModules(const Factory& factory, const std::string& pos,
 
         std::shared_ptr<AModule> module_sp(module);
         modules_all_.emplace_back(module_sp);
+        if (group == nullptr && config[ref]["overflow-priority"].isInt()) {
+          overflow_priorities_[module] = {config[ref]["overflow-priority"].asInt(),
+                                          static_cast<int>(overflow_priorities_.size())};
+        }
         if (group != nullptr) {
           group->addWidget(*module);
         } else {
@@ -611,19 +616,28 @@ auto waybar::Bar::setupWidgets() -> void {
   }
   getModules(factory, "modules-right");
 
+  // Any module can grow and push the bar past the screen edge, so re-check
+  // overflow whenever any module updates.
+  if (!overflow_priorities_.empty()) {
+    for (auto const& module : modules_all_) {
+      module->dp.connect(sigc::mem_fun(*this, &Bar::scheduleOverflowCheck));
+    }
+  }
+
   for (auto const& module : modules_left_) {
-    left_.pack_start(*module, module->expandEnabled(), module->expandEnabled());
+    left_.pack_start(wrapForOverflow(module), module->expandEnabled(), module->expandEnabled());
   }
 
   if (!no_center) {
     for (auto const& module : modules_center_) {
-      center_.pack_start(*module, module->expandEnabled(), module->expandEnabled());
+      center_.pack_start(wrapForOverflow(module), module->expandEnabled(),
+                         module->expandEnabled());
     }
   }
 
   std::reverse(modules_right_.begin(), modules_right_.end());
   for (auto const& module : modules_right_) {
-    right_.pack_end(*module, module->expandEnabled(), module->expandEnabled());
+    right_.pack_end(wrapForOverflow(module), module->expandEnabled(), module->expandEnabled());
   }
 }
 
@@ -650,6 +664,7 @@ void waybar::Bar::onConfigure(GdkEventConfigure* ev) {
 
   configureGlobalOffset(ev->width, ev->height);
   spdlog::info(BAR_SIZE_MSG, ev->width, ev->height, output->name);
+  scheduleOverflowCheck();
 }
 
 void waybar::Bar::configureGlobalOffset(int width, int height) {
@@ -693,4 +708,124 @@ void waybar::Bar::configureGlobalOffset(int width, int height) {
 
 void waybar::Bar::onOutputGeometryChanged() {
   configureGlobalOffset(window.get_width(), window.get_height());
+  scheduleOverflowCheck();
+}
+
+/*
+ * overflow-priority (fork feature)
+ *
+ * Top-level modules may set "overflow-priority": <int>. When the bar's minimum
+ * width (height for vertical bars) exceeds the space available on the output,
+ * modules with a priority are hidden, lowest priority first (ties: the module
+ * listed later in the config is hidden first), until the bar fits again.
+ * Modules without the key are never hidden. Hidden modules come back as soon
+ * as there is room again.
+ */
+Gtk::Widget& waybar::Bar::wrapForOverflow(const std::shared_ptr<waybar::AModule>& module) {
+  auto it = overflow_priorities_.find(module.get());
+  if (it == overflow_priorities_.end()) {
+    return *module;
+  }
+  OverflowEntry entry;
+  entry.wrapper = std::make_unique<Gtk::Box>(orientation, 0);
+  entry.wrapper->get_style_context()->add_class("overflow-wrapper");
+  entry.wrapper->pack_start(*module, true, true);
+  entry.priority = it->second.first;
+  entry.order = it->second.second;
+  overflow_entries_.emplace_back(std::move(entry));
+  return *overflow_entries_.back().wrapper;
+}
+
+void waybar::Bar::scheduleOverflowCheck() {
+  if (overflow_entries_.empty() || overflow_check_pending_) {
+    return;
+  }
+  overflow_check_pending_ = true;
+  Glib::signal_idle().connect_once(
+      [this] {
+        overflow_check_pending_ = false;
+        checkOverflow();
+      },
+      Glib::PRIORITY_HIGH_IDLE + 15);
+}
+
+bool waybar::Bar::overflowExceeds() {
+  if (!output || !output->monitor) {
+    return false;
+  }
+  Gdk::Rectangle geometry;
+  output->monitor->get_geometry(geometry);
+  // Sum the three sections' sizes and compare with the space on the output.
+  // "minimum" (default): hide only when the bar can no longer fit even with
+  // every ellipsizing label squeezed, i.e. content would go off screen.
+  // "natural": hide as soon as anything would need to be squeezed.
+  const bool use_natural = config["overflow-measure"].asString() == "natural";
+  auto measure = [this, use_natural](Gtk::Box& section) {
+    if (!section.get_visible() || section.get_parent() == nullptr) return 0;
+    int min = 0;
+    int natural = 0;
+    if (orientation == Gtk::ORIENTATION_HORIZONTAL) {
+      section.get_preferred_width(min, natural);
+    } else {
+      section.get_preferred_height(min, natural);
+    }
+    return use_natural ? natural : min;
+  };
+  int natural = measure(left_) + measure(center_) + measure(right_);
+  spdlog::trace("overflow-priority: left={} center={} right={} geom={}x{} width_={}",
+                measure(left_), measure(center_), measure(right_), geometry.get_width(),
+                geometry.get_height(), width_);
+  if (orientation == Gtk::ORIENTATION_HORIZONTAL) {
+    int available = width_ > 1 && static_cast<int>(width_) < geometry.get_width()
+                        ? static_cast<int>(width_)
+                        : geometry.get_width() - margins_.left - margins_.right;
+    return natural > available;
+  }
+  int available = height_ > 1 && static_cast<int>(height_) < geometry.get_height()
+                      ? static_cast<int>(height_)
+                      : geometry.get_height() - margins_.top - margins_.bottom;
+  return natural > available;
+}
+
+void waybar::Bar::checkOverflow() {
+  if (overflow_checking_ || overflow_entries_.empty()) {
+    return;
+  }
+  overflow_checking_ = true;
+
+  // Restore everything, then hide in priority order until the bar fits.
+  // All of this happens synchronously, so no intermediate frame is drawn.
+  std::vector<bool> was_hidden;
+  for (auto& entry : overflow_entries_) {
+    was_hidden.push_back(entry.hidden);
+    if (entry.hidden) {
+      entry.wrapper->show();
+      entry.hidden = false;
+    }
+  }
+
+  std::vector<OverflowEntry*> order;
+  for (auto& entry : overflow_entries_) {
+    order.push_back(&entry);
+  }
+  std::stable_sort(order.begin(), order.end(), [](const auto* a, const auto* b) {
+    if (a->priority != b->priority) return a->priority < b->priority;
+    return a->order > b->order;
+  });
+
+  for (auto* entry : order) {
+    if (!overflowExceeds()) {
+      break;
+    }
+    entry->wrapper->hide();
+    entry->hidden = true;
+  }
+
+  for (size_t i = 0; i < overflow_entries_.size(); ++i) {
+    if (was_hidden[i] != overflow_entries_[i].hidden) {
+      spdlog::debug("overflow-priority: module #{} {}", i,
+                    overflow_entries_[i].hidden ? "hidden" : "restored");
+    }
+  }
+  overflow_checking_ = false;
 }

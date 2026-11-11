@@ -107,6 +107,7 @@ class Bar : public sigc::trackable {
   void scheduleOverflowCheck();
   bool overflowExceeds();
   void checkOverflow();
+  bool runOverflowCheck();
 
   /* Copy initial set of modes to allow customization */
   bar_mode_map configured_modes = PRESET_MODES;
@@ -139,6 +140,7 @@ class Bar : public sigc::trackable {
   std::map<waybar::AModule*, std::pair<int, int>> overflow_priorities_;  // priority, config order
   std::vector<OverflowEntry> overflow_entries_;
   bool overflow_check_pending_ = false;
+  sigc::connection overflow_check_connection_;
   bool overflow_checking_ = false;
 
   waybar::util::KillSignalAction onSigusr1 = util::SIGNALACTION_DEFAULT_SIGUSR1;

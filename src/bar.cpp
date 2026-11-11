@@ -322,7 +322,11 @@ waybar::Bar::Bar(struct waybar_output* w_output, const Json::Value& w_config)
 }
 
 /* Need to define it here because of forward declared members */
-waybar::Bar::~Bar() = default;
+waybar::Bar::~Bar() {
+  // Cancel queued work before destroying the widgets it accesses. Output removal
+  // can destroy a bar between scheduling an overflow check and the idle dispatch.
+  overflow_check_connection_.disconnect();
+}
 
 void waybar::Bar::setMode(const std::string& mode) {
   using namespace std::literals::string_literals;
@@ -741,12 +745,15 @@ void waybar::Bar::scheduleOverflowCheck() {
     return;
   }
   overflow_check_pending_ = true;
-  Glib::signal_idle().connect_once(
-      [this] {
-        overflow_check_pending_ = false;
-        checkOverflow();
-      },
+  overflow_check_connection_ = Glib::signal_idle().connect(
+      sigc::mem_fun(*this, &Bar::runOverflowCheck),
       Glib::PRIORITY_HIGH_IDLE + 15);
+}
+
+bool waybar::Bar::runOverflowCheck() {
+  overflow_check_pending_ = false;
+  checkOverflow();
+  return false;
 }
 
 bool waybar::Bar::overflowExceeds() {

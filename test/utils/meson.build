@@ -12,6 +12,7 @@ test_src = files(
     '../config.cpp',
     '../../src/config.cpp',
     'JsonParser.cpp',
+    'waveform.cpp',
     'SafeSignal.cpp',
     'css_reload_helper.cpp',
     '../../src/util/css_reload_helper.cpp',

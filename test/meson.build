@@ -29,3 +29,19 @@ test(
 
 subdir('utils')
 subdir('hyprland')
+
+xvfb_run = find_program('xvfb-run', required: false)
+if xvfb_run.found()
+    waveform_gtk_test = executable(
+        'waveform_gtk_test',
+        'waveform_gtk.cpp',
+        '../src/modules/waveform.cpp',
+        '../src/AModule.cpp',
+        dependencies: [fmt, gtkmm, jsoncpp, spdlog],
+        include_directories: test_inc,
+    )
+    test('waveform-gtk', xvfb_run,
+         args: ['-a', waveform_gtk_test],
+         env: ['GDK_BACKEND=x11'],
+         timeout: 15)
+endif

@@ -164,6 +164,7 @@ src_files = files(
     'src/AIconLabel.cpp',
     'src/AAppIconLabel.cpp',
     'src/modules/custom.cpp',
+    'src/modules/waveform.cpp',
     'src/modules/disk.cpp',
     'src/modules/idle_inhibitor.cpp',
     'src/modules/image.cpp',
@@ -190,6 +191,7 @@ src_files = files(
 
 man_files = files(
     'man/waybar-custom.5.scd',
+    'man/waybar-waveform.5.scd',
     'man/waybar-disk.5.scd',
     'man/waybar-idle-inhibitor.5.scd',
     'man/waybar-image.5.scd',

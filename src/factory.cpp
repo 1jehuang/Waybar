@@ -117,6 +117,7 @@
 #include "modules/cava/cava_frontend.hpp"
 #include "modules/cffi.hpp"
 #include "modules/custom.hpp"
+#include "modules/waveform.hpp"
 #include "modules/image.hpp"
 #include "modules/temperature.hpp"
 #include "modules/user.hpp"
@@ -354,6 +355,9 @@ waybar::AModule* waybar::Factory::makeModule(const std::string& name,
 #endif
     if (ref == "temperature") {
       return new waybar::modules::Temperature(id, config_[name]);
+    }
+    if (ref.compare(0, 9, "waveform/") == 0 && ref.size() > 9) {
+      return new waybar::modules::Waveform(ref.substr(9), id, config_[name], bar_.output->name);
     }
     if (ref.compare(0, 7, "custom/") == 0 && ref.size() > 7) {
       return new waybar::modules::Custom(ref.substr(7), id, config_[name], bar_.output->name);

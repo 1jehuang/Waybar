@@ -13,14 +13,9 @@ TEST_CASE("Waveform pills aggregate recent measured history without synthetic mo
   REQUIRE(pill_levels({}) == std::array<double, 7>{});
   REQUIRE(pill_levels(std::vector<double>(128, 0)) == std::array<double, 7>{});
   REQUIRE(pill_levels(std::vector<double>(128, 1)) == std::array<double, 7>{1, 1, 1, 1, 1, 1, 1});
-  std::vector<double> history(100, 1);
-  for (unsigned bin = 0; bin < 7; ++bin)
-    for (unsigned i = 0; i < 4; ++i) history.push_back(bin / 6.0);
-  auto values = pill_levels(history);
-  for (unsigned bin = 0; bin < 7; ++bin) REQUIRE(std::abs(values[bin] - bin / 6.0) < 1e-12);
-  history.assign(28, 0);
-  for (unsigned i = 3; i < 28; i += 4) history[i] = 1;
-  REQUIRE(pill_levels(history) == std::array<double, 7>{.5, .5, .5, .5, .5, .5, .5});
+  REQUIRE(pill_levels({1}) == std::array<double, 7>{0, 0, 0, 1, 0, 0, 0});
+  REQUIRE(pill_levels({1, 0}) == std::array<double, 7>{0, 0, 1, 0, 1, 0, 0});
+  REQUIRE(pill_levels({1, 0, 0, 0, 0}) == std::array<double, 7>{});
 }
 
 TEST_CASE("Waveform bounds configured animation frame rate", "[waveform]") {

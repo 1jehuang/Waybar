@@ -173,7 +173,8 @@ bool Waveform::draw(const Cairo::RefPtr<Cairo::Context>& cr) {
   const double pill_width = std::clamp(slot * .45, 2.0, 8.0);
   constexpr double pi = 3.141592653589793;
   for (size_t i = 0; i < current.size(); ++i) {
-    const double amplitude = previous[i] + (current[i] - previous[i]) * progress_;
+    const double amplitude = current[i] >= previous[i] ? current[i]
+        : previous[i] + (current[i] - previous[i]) * progress_;
     const double pill_height = 2 + amplitude * std::max(0.0, h - 6);
     const double radius = std::min(pill_width, pill_height) / 2;
     const double x = (i + .5) * slot - pill_width / 2;

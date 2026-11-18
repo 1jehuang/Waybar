@@ -18,19 +18,11 @@ inline unsigned frames_per_second(const Json::Value& value) {
   return value.isInt() ? static_cast<unsigned>(std::clamp(value.asInt(), 1, 60)) : 60u;
 }
 
-// Seven chronological RMS bins from the most recent 28 measured amplitudes.
-// Quiet bins stay zero. The renderer supplies a separate two-pixel affordance.
+// Newest measurement in the middle, older samples mirrored on either side.
 inline std::array<double, 7> pill_levels(const std::vector<double>& history) {
   std::array<double, 7> result{};
-  const size_t count = std::min<size_t>(28, history.size());
-  if (!count) return result;
-  const size_t offset = history.size() - count;
-  for (size_t bin = 0; bin < result.size(); ++bin) {
-    const size_t begin = bin * count / result.size();
-    const size_t end = std::max(begin + 1, (bin + 1) * count / result.size());
-    double squares = 0;
-    for (size_t i = begin; i < end; ++i) squares += history[offset + i] * history[offset + i];
-    result[bin] = std::sqrt(squares / (end - begin));
+  for (size_t age = 0; age < std::min<size_t>(4, history.size()); ++age) {
+    result[3 - age] = result[3 + age] = history[history.size() - 1 - age];
   }
   return result;
 }

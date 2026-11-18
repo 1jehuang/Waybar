@@ -2,6 +2,7 @@
 #include <gtkmm.h>
 #include <unistd.h>
 
+#include <cstdint>
 #include <iostream>
 #include <list>
 #include <mutex>
@@ -33,10 +34,14 @@ int main(int argc, char** argv) {
   Json::Value config;
   config["exec"] = "cat <&" + std::to_string(source[0]);
   config["on-click"] = "true";
+  config["fps"] = 120;  // The native renderer must cap this at 60.
   TestWaveform module("jarvis", "", config, "test-output");
   auto& box = dynamic_cast<Gtk::EventBox&>(static_cast<Gtk::Widget&>(module));
   auto* area = dynamic_cast<Gtk::DrawingArea*>(box.get_child());
   if (!area) return 2;
+  auto css = Gtk::CssProvider::create();
+  css->load_from_data("#waveform-jarvis { color: white; background-color: transparent; }");
+  area->get_style_context()->add_provider(css, GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
   Gtk::Window window;
   window.add(box);
   window.show();
@@ -64,6 +69,38 @@ int main(int argc, char** argv) {
   auto settled = draws;
   pump(160);
   if (draws != settled) return 5;
+  auto hasQuietPills = [&] {
+    const int w = area->get_allocated_width(), h = area->get_allocated_height();
+    auto image = Cairo::ImageSurface::create(Cairo::FORMAT_ARGB32, w, h);
+    auto context = Cairo::Context::create(image);
+    gtk_widget_draw(GTK_WIDGET(area->gobj()), context->cobj());
+    image->flush();
+    auto alpha = [&](int x, int y) {
+      const auto* row =
+          reinterpret_cast<const std::uint32_t*>(image->get_data() + y * image->get_stride());
+      return row[x] >> 24;
+    };
+    unsigned runs = 0;
+    bool inside = false;
+    for (int x = 0; x < w; ++x) {
+      const bool visible = alpha(x, h / 2) > 0;
+      if (visible && !inside) ++runs;
+      inside = visible;
+    }
+    if (runs != 7) return false;
+    for (unsigned pill = 0; pill < 7; ++pill) {
+      const int x = static_cast<int>((pill + .5) * w / 7);
+      unsigned rows = 0;
+      for (int y = 0; y < h; ++y)
+        if (alpha(x, y) > 0) ++rows;
+      if (rows != 2) return false;
+    }
+    return true;
+  };
+  send(R"({"levels":[0,0,0],"capturing":true,"state":"listening","sequence":3})");
+  if (!hasQuietPills()) return 14;
+  send(R"({"levels":[],"capturing":true,"state":"listening","sequence":4})");
+  if (!hasQuietPills()) return 15;
   send(R"({"levels":[],"capturing":false,"state":"paused"})");
   int width, height;
   area->get_size_request(width, height);

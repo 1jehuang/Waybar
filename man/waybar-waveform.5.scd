@@ -9,9 +9,11 @@ waybar - native measured-amplitude waveform
 The *waveform/<name>* module reads newline-delimited JSON from a continuous
 *exec* command. It does not capture audio. The producer supplies measured,
 chronological amplitude history, oldest first. The native GTK drawing area
-renders an antialiased, filled symmetric envelope using the CSS foreground
-color, interpolating changed active history on the GTK frame clock at up to
-60 frames per second. Animation stops after each sample interval. Unchanged,
+renders seven antialiased rounded vertical pills using the CSS foreground
+color. Each pill represents one chronological RMS bin from the latest up to
+28 measured samples, oldest on the left. Changed measured heights interpolate
+on the GTK frame clock at up to 60 frames per second. No synthetic motion or
+oscillator is generated. Animation stops after each sample interval. Unchanged,
 paused and off frames do not start animation timers.
 
 # CONFIGURATION
@@ -22,9 +24,16 @@ paused and off frames do not start animation timers.
 	custom modules, WAYBAR_OUTPUT_NAME identifies the bar output. Commands
 	are run through /bin/sh. The producer must remain running while paused.
 
+*fps*: ++
+	typeof: integer ++
+	default: 60 ++
+	Maximum animation redraw rate, clamped to 1..60 frames per second. Lower
+	values trade smoothness for fewer redraws. GTK frame-clock availability
+	may reduce the actual frame rate further.
+
 *width*: ++
 	typeof: integer ++
-	default: 180 ++
+	default: 86 ++
 	Active width in logical pixels, bounded to 24..2048.
 
 *height*: ++
@@ -55,6 +64,10 @@ compact pause affordance, or an error mark for state *error*, retaining the
 normal click target. EOF or malformed JSON shows the error affordance.
 A subsequent valid record recovers automatically while the command is running.
 
+The last valid record remains authoritative until another record or EOF.
+The producer/helper owns capture freshness and must emit off or paused when
+its measured audio source expires. The module does not start a freshness timer.
+
 Records are limited to 16384 bytes excluding newline. Oversized records are
 discarded through the next newline. At most 64 KiB are read per main-loop
 dispatch, with only the newest complete valid frame retained. There is no
@@ -65,14 +78,16 @@ unbounded sample queue. The command is not automatically restarted on EOF.
 The drawing area is named *#waveform-<name>*, for example *#waveform-jarvis*.
 It has the *module* class, the configured instance ID class, the current
 *state* class, and the producer's optional *class*. Set CSS *color* to choose
-the waveform and compact affordance color. Silence remains genuinely flat.
+the pills and compact affordance color. Quiet or empty capture history leaves
+seven static two-pixel-high capsules visible. The minimum height is a capture
+affordance, not generated audio amplitude.
 
 # EXAMPLE
 
 ```
 "waveform/jarvis": {
     "exec": "jarvis-waveform-stream",
-    "width": 180,
+    "width": 86,
     "height": 24,
     "on-click": "jarvis-toggle"
 }

@@ -9,6 +9,7 @@ namespace waybar::modules {
 Waveform::Waveform(const std::string& name, const std::string& id, const Json::Value& config,
                    const std::string& output)
     : AModule(config, "waveform-" + name, id) {
+  fps_ = waveform::frames_per_second(config["fps"]);
   if (config["width"].isInt()) width_ = std::clamp(config["width"].asInt(), 24, 2048);
   if (config["height"].isInt()) height_ = std::clamp(config["height"].asInt(), 8, 256);
   area_.set_name("waveform-" + name);
@@ -134,7 +135,7 @@ void Waveform::update() {
 gboolean Waveform::tick(GtkWidget*, GdkFrameClock* clock, gpointer data) {
   auto& self = *static_cast<Waveform*>(data);
   const auto now = gdk_frame_clock_get_frame_time(clock);
-  if (self.last_tick_ && now - self.last_tick_ < 16666) return G_SOURCE_CONTINUE;
+  if (self.last_tick_ && now - self.last_tick_ < 1000000 / self.fps_) return G_SOURCE_CONTINUE;
   self.last_tick_ = now;
   self.progress_ = std::clamp(
       static_cast<double>(now - self.started_) / (self.frame_.interval_ms * 1000.0), 0.0, 1.0);
@@ -166,36 +167,24 @@ bool Waveform::draw(const Cairo::RefPtr<Cairo::Context>& cr) {
     }
     return true;
   }
-  if (frame_.levels.empty()) return true;
-  const size_t n = std::max<size_t>(2, frame_.levels.size());
-  const double step = w / std::max<size_t>(1, n - 1);
-  const double shift = frame_.sequence > previous_.sequence
-                           ? std::min<Json::UInt64>(frame_.sequence - previous_.sequence, n)
-                           : 0;
-  auto amplitude = [&](size_t i) {
-    double value = frame_.levels[std::min(i, frame_.levels.size() - 1)];
-    if (progress_ < 1 && !previous_.levels.empty()) {
-      // Scroll the old measured history left, then blend only against measured new data.
-      double pos = std::min<double>(i + progress_ * shift, previous_.levels.size() - 1);
-      size_t a = static_cast<size_t>(pos), b = std::min(a + 1, previous_.levels.size() - 1);
-      double old = previous_.levels[a] + (previous_.levels[b] - previous_.levels[a]) * (pos - a);
-      value = old + (value - old) * progress_;
-    }
-    return value * (h / 2 - 2);
-  };
-  cr->move_to(0, h / 2 - amplitude(0));
-  for (size_t i = 1; i < n; ++i) {
-    const double mid = (i - .5) * step;
-    cr->curve_to(mid, h / 2 - amplitude(i - 1), mid, h / 2 - amplitude(i), i * step,
-                 h / 2 - amplitude(i));
+  const auto current = waveform::pill_levels(frame_.levels);
+  const auto previous = waveform::pill_levels(previous_.levels);
+  const double slot = w / current.size();
+  const double pill_width = std::clamp(slot * .45, 2.0, 8.0);
+  constexpr double pi = 3.141592653589793;
+  for (size_t i = 0; i < current.size(); ++i) {
+    const double amplitude = previous[i] + (current[i] - previous[i]) * progress_;
+    const double pill_height = 2 + amplitude * std::max(0.0, h - 6);
+    const double radius = std::min(pill_width, pill_height) / 2;
+    const double x = (i + .5) * slot - pill_width / 2;
+    const double y = (h - pill_height) / 2;
+    cr->begin_new_sub_path();
+    cr->arc(x + pill_width - radius, y + radius, radius, -pi / 2, 0);
+    cr->arc(x + pill_width - radius, y + pill_height - radius, radius, 0, pi / 2);
+    cr->arc(x + radius, y + pill_height - radius, radius, pi / 2, pi);
+    cr->arc(x + radius, y + radius, radius, pi, 3 * pi / 2);
+    cr->close_path();
   }
-  cr->line_to((n - 1) * step, h / 2 + amplitude(n - 1));
-  for (size_t i = n - 1; i > 0; --i) {
-    const double mid = (i - .5) * step;
-    cr->curve_to(mid, h / 2 + amplitude(i), mid, h / 2 + amplitude(i - 1), (i - 1) * step,
-                 h / 2 + amplitude(i - 1));
-  }
-  cr->close_path();
   cr->fill();
   return true;
 }

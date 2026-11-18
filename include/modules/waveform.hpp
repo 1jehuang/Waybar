@@ -27,6 +27,7 @@ class Waveform : public AModule {
   guint tick_id_ = 0;
   gint64 started_ = 0, last_tick_ = 0;
   double progress_ = 1;
-  int width_ = 180, height_ = 24;
+  unsigned fps_ = 60;
+  int width_ = 86, height_ = 24;
 };
 }  // namespace waybar::modules
